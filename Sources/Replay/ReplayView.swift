@@ -12,6 +12,9 @@ public class ReplayView: UIView, ReplayPlatform {
     var audioPlayer: ReplayAudioPlayer
     var logger: ReplayLogger
     var storageProvider: ReplayStorageProvider
+    var alerter: ReplayAlerter
+    var clipboardManager: ReplayClipboardManager
+    var timerManager = TimerManager()
     
     var deviceSize: DeviceSize!
     var gameViewSize: GameViewSize!
@@ -29,7 +32,9 @@ public class ReplayView: UIView, ReplayPlatform {
         mockDateNow: Date? = nil,
         mockAudioPlayer: ReplayAudioPlayer? = nil,
         mockLogger: ReplayLogger? = nil,
-        mockStorage: ReplayStorageProvider? = nil
+        mockStorage: ReplayStorageProvider? = nil,
+        mockAlerter: ReplayAlerter? = nil,
+        mockClipboardManager: ReplayClipboardManager? = nil
     ) {
         self.session = mockSession ?? URLSession.shared
         self.dateGenerator = ReplayDateGenerator(mockDateNow: mockDateNow)
@@ -39,6 +44,8 @@ public class ReplayView: UIView, ReplayPlatform {
             print(message)
         }
         self.storageProvider = mockStorage ?? StorageProvider()
+        self.alerter = mockAlerter ?? Alerter()
+        self.clipboardManager = mockClipboardManager ?? ClipboardManager()
         
         super.init(frame: frame)
         
@@ -63,7 +70,9 @@ public class ReplayView: UIView, ReplayPlatform {
             platform: self,
             replayJsRuntime: replayJsRuntime,
             deviceSize: deviceSize,
-            nativeSpriteMap: nativeSpriteMap ?? [:]
+            nativeSpriteMap: nativeSpriteMap ?? [:],
+            runtime: replayJsRuntime,
+            resetInputs: resetInputs
         )
         self.getNextFrameTextures = getNextFrameTextures
         self.spriteTextures = initTextures
@@ -97,9 +106,7 @@ extension ReplayView {
         }
         
         spriteTextures = getNextFrameTextures((currentTime - initTime!) * 1000)
-        
-        resetInputs()
-        
+                
         // Calls the draw method on the next frame
         setNeedsDisplay()
     }
@@ -165,7 +172,10 @@ extension ReplayView {
                 dateGenerator: self.dateGenerator,
                 audioPlayer: self.audioPlayer,
                 logger: self.logger,
-                storageProvider: self.storageProvider
+                storageProvider: self.storageProvider,
+                alerter: self.alerter,
+                clipboardManager: self.clipboardManager,
+                timerManager: self.timerManager
             )
         }
     }
