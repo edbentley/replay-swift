@@ -35,6 +35,10 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate {
         webConfiguration.userContentController = contentController
         webConfiguration.mediaTypesRequiringUserActionForPlayback = []
         
+        // Allow fetching local files in JS. This is not documented, but Stack Overflow says it's ok
+        // https://stackoverflow.com/questions/36013645/setting-disable-web-security-and-allow-file-access-from-files-in-ios-wkwebvi
+        webConfiguration.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs");
+        
         webView = ReplayWebView(frame: .zero, configuration: webConfiguration)
         webView.scrollView.isScrollEnabled = false
         webView.isMultipleTouchEnabled = true
@@ -73,7 +77,7 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate {
         webView.evaluateJavaScript(gameJsString) { (_, error) in
             if let error = error {
                 // Hi 👋! You can temporarily set useLocalHost in ReplayViewController to true to read this error message - but your game will not be able to load any audio or image assets.
-                fatalError(error.localizedDescription)
+                fatalError("\(error)")
             }
             
             self.webView.loadHTMLString(
