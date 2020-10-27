@@ -18,8 +18,6 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate {
     let onLogCallback: (String) -> Void // for testing
     
     init(
-        // See full JS errors, but won't load image / audio assets (for debugging)
-        useLocalHost: Bool = false,
         customGameJsString: String? = nil,
         onLoadCallback: @escaping () -> Void = {},
         onLogCallback: @escaping (String) -> Void = {_ in }
@@ -56,45 +54,30 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate {
             guard let gameJsPathString = try? String(
                 contentsOfFile: gameJsPath,
                 encoding: String.Encoding.utf8
-                ) else {
-                    fatalError("Couldn't read JS file at path \(gameJsPath)")
+            ) else {
+                fatalError("Couldn't read JS file at path \(gameJsPath)")
             }
             gameJsString = gameJsPathString
         }
         
-        // don't try to load assets and wrap in try/catch
-        if useLocalHost {
-            gameJsString = """
-            try {
-                \(gameJsString)
-                game.options.assets = {};
-            } catch (e) {
-                window.webkit.messageHandlers.error.postMessage(e.message || e);
-            }
-            """
-        }
+        let renderCanvasJsPath = Bundle.module.path(forResource: "renderCanvas", ofType: ".js")!
+        let renderCanvasJsString = try! String(
+            contentsOfFile: renderCanvasJsPath,
+            encoding: String.Encoding.utf8
+        )
         
-        webView.evaluateJavaScript(gameJsString) { (_, error) in
-            if let error = error {
-                // Hi 👋! You can temporarily set useLocalHost in ReplayViewController to true to read this error message - but your game will not be able to load any audio or image assets.
-                fatalError("\(error)")
-            }
-            
-            self.webView.loadHTMLString(
-                replayRenderCanvasHtmlString,
-                baseURL: useLocalHost ? URL(string: "http://localhost/")! : Bundle.main.bundleURL
-            )
-        }
+        let htmlString = getReplayRenderCanvasHtmlString(
+            renderCanvasJsString: renderCanvasJsString,
+            gameJsString: gameJsString
+        )
+        
+        self.webView.loadHTMLString(htmlString, baseURL: Bundle.main.bundleURL)
     }
     
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case ERROR:
-            if message.body as? String == "Script error." {
-                print("A JS error occurred but we can't read the error message. You can temporarily set useLocalHost in ReplayViewController to true to read it - but your game will not be able to load any audio or image assets.")
-            } else {
-                print("JS Error: \(message.body)")
-            }
+            fatalError("\(message.body)")
         case CONSOLE_LOG:
             onLogCallback("\(message.body)")
             print(message.body)
