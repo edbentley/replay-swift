@@ -1,7 +1,6 @@
 import WebKit
 
 let CONSOLE_LOG = "consoleLog"
-let DID_LOAD = "didLoad"
 let ERROR = "error"
 
 public class ReplayWebView: WKWebView {
@@ -10,25 +9,21 @@ public class ReplayWebView: WKWebView {
     }
 }
 
-class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate {
+class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     let webConfiguration = WKWebViewConfiguration()
     var webView: ReplayWebView!
     let alerter = Alerter()
-    let onLoadCallback: () -> Void
     let onLogCallback: (String) -> Void // for testing
     
     init(
         customGameJsString: String? = nil,
-        onLoadCallback: @escaping () -> Void = {},
         onLogCallback: @escaping (String) -> Void = {_ in }
     ) {
-        self.onLoadCallback = onLoadCallback
         self.onLogCallback = onLogCallback
         super.init()
         
         let contentController = WKUserContentController()
         contentController.add(self, name: CONSOLE_LOG)
-        contentController.add(self, name: DID_LOAD)
         contentController.add(self, name: ERROR)
         webConfiguration.userContentController = contentController
         webConfiguration.mediaTypesRequiringUserActionForPlayback = []
@@ -41,6 +36,12 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate {
         webView.scrollView.isScrollEnabled = false
         webView.isMultipleTouchEnabled = true
         webView.uiDelegate = self
+        webView.navigationDelegate = self
+        
+        // Disable haptic feedback on long press
+        let longPress = UILongPressGestureRecognizer(target: nil, action: nil)
+        longPress.minimumPressDuration = 0.1
+        webView.addGestureRecognizer(longPress)
         
         // Load in game
         var gameJsString = ""
@@ -81,8 +82,6 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate {
         case CONSOLE_LOG:
             onLogCallback("\(message.body)")
             print(message.body)
-        case DID_LOAD:
-            onLoadCallback()
         default:
             print("Unknown webKit message \(message.name)")
         }
@@ -94,6 +93,10 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate {
     
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
         alerter.okCancel(message, onResponse: completionHandler)
+    }
+    
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        fatalError("Web view terminated. This may be caused by your game using up too much memory.")
     }
 }
 
