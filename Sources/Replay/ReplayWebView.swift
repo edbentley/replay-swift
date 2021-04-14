@@ -2,10 +2,17 @@ import WebKit
 
 let CONSOLE_LOG = "consoleLog"
 let ERROR = "error"
+let JS_CALLBACK = "jsCallback"
 
 public class ReplayWebView: WKWebView {
     public override var safeAreaInsets: UIEdgeInsets {
         return UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    }
+    
+    public func jsBridge(messageId: String, jsArg: String) {
+        self.evaluateJavaScript(
+            "window.__replayGlobalCallbacks__[`\(messageId)`](\(jsArg));"
+        )
     }
 }
 
@@ -13,18 +20,23 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNa
     let webConfiguration = WKWebViewConfiguration()
     var webView: ReplayWebView!
     let alerter = Alerter()
+    let onJsCallback: (String) -> Void // userland
     let onLogCallback: (String) -> Void // for testing
+    let internalMessageKey = "__internalReplay"
     
     init(
         customGameJsString: String? = nil,
-        onLogCallback: @escaping (String) -> Void = {_ in }
+        onLogCallback: @escaping (String) -> Void = {_ in },
+        onJsCallback: @escaping (String) -> Void
     ) {
         self.onLogCallback = onLogCallback
+        self.onJsCallback = onJsCallback
         super.init()
         
         let contentController = WKUserContentController()
         contentController.add(self, name: CONSOLE_LOG)
         contentController.add(self, name: ERROR)
+        contentController.add(self, name: JS_CALLBACK)
         webConfiguration.userContentController = contentController
         webConfiguration.mediaTypesRequiringUserActionForPlayback = []
         
@@ -82,6 +94,14 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNa
         case CONSOLE_LOG:
             onLogCallback("\(message.body)")
             print(message.body)
+        case JS_CALLBACK:
+            let value = "\(message.body)"
+            if value.starts(with: internalMessageKey) {
+                let restOfMessage = String(value.dropFirst(internalMessageKey.count))
+                handleInternalMessage(message: restOfMessage)
+            } else {
+                onJsCallback(value)
+            }
         default:
             print("Unknown webKit message \(message.name)")
         }
@@ -97,6 +117,25 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNa
     
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         fatalError("Web view terminated. This may be caused by your game using up too much memory.")
+    }
+    
+    func handleInternalMessage(message: String) {
+        switch message {
+        case let x where x.starts(with: ReplayStorageProvider.messagePrefix):
+            ReplayStorageProvider.handleInternalMessage(
+                message: message,
+                webView: webView,
+                internalMessageKey: internalMessageKey
+            )
+        case let x where x.starts(with: ReplayClipboardManager.messagePrefix):
+            ReplayClipboardManager.handleInternalMessage(
+                message: message,
+                webView: webView,
+                internalMessageKey: internalMessageKey
+            )
+        default:
+            break
+        }
     }
 }
 

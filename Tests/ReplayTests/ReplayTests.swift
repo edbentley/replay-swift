@@ -17,11 +17,37 @@ final class ReplayTests: XCTestCase {
             encoding: String.Encoding.utf8
         )
         
-        let onLogCallback = { logs.append($0) }
-        let webView = ReplayWebViewManager(
+        var webView: ReplayWebView!
+        
+        let storageExpectation1 = self.expectation(description: "item1 set")
+        let storageExpectation2 = self.expectation(description: "item1 removed")
+        let storageExpectation3 = self.expectation(description: "item2 not set")
+        
+        let onLogCallback = { (value: String) in
+            logs.append(value)
+            
+            // Check async callbacks
+            if value == "item1 set: hi" {
+                storageExpectation1.fulfill()
+            }
+            if value == "item1 removed: null" {
+                storageExpectation2.fulfill()
+            }
+            if value == "item2: null" {
+                storageExpectation3.fulfill()
+            }
+        }
+        
+        webView = ReplayWebViewManager(
             customGameJsString: gameJsString,
-            onLogCallback: onLogCallback
-        ).webView!
+            onLogCallback: onLogCallback,
+            onJsCallback: { (message) in
+                if (message == "Hello!") {
+                    webView?.jsBridge(messageId: "TestBridge", jsArg: "{ response: `Hi!` }")
+                }
+            }
+        ).webView
+        
         webView.frame = .init(x: 0, y: 0, width: 375, height: 812) // iPhone X
         
         let navigationDelegate = NavigationDelegate {
@@ -57,5 +83,15 @@ final class ReplayTests: XCTestCase {
         // Native Sprite logs
         XCTAssertTrue(logs.contains("create Game"))
         XCTAssertTrue(logs.contains("loop hello there Game"))
+        
+        // JS / Swift Bridge
+        XCTAssertTrue(logs.contains("Bridge response: Hi!"))
+        
+        // Storage
+        wait(for: [storageExpectation1, storageExpectation2, storageExpectation3], timeout: 5)
+        
+        // Clipboard
+        XCTAssertTrue(logs.contains("Copied!"))
+        XCTAssertEqual(UIPasteboard.general.string, "some_text")
     }
 }
