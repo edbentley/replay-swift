@@ -19,18 +19,23 @@ public class ReplayWebView: WKWebView {
 class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     let webConfiguration = WKWebViewConfiguration()
     var webView: ReplayWebView!
-    let alerter = Alerter()
+    var userStyles: String
+    var customGameJsString: String?
+    let alerter = ReplayAlerter()
     let onJsCallback: (String) -> Void // userland
     let onLogCallback: (String) -> Void // for testing
     let internalMessageKey = "__internalReplay"
     
     init(
         customGameJsString: String? = nil,
+        userStyles: String,
         onLogCallback: @escaping (String) -> Void = {_ in },
         onJsCallback: @escaping (String) -> Void
     ) {
         self.onLogCallback = onLogCallback
         self.onJsCallback = onJsCallback
+        self.userStyles = userStyles
+        self.customGameJsString = customGameJsString
         super.init()
         
         let contentController = WKUserContentController()
@@ -55,6 +60,10 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNa
         longPress.minimumPressDuration = 0.1
         webView.addGestureRecognizer(longPress)
         
+        loadGame()
+    }
+    
+    func loadGame() {
         // Load in game
         var gameJsString = ""
         
@@ -81,7 +90,8 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNa
         
         let htmlString = getReplayRenderCanvasHtmlString(
             renderCanvasJsString: renderCanvasJsString,
-            gameJsString: gameJsString
+            gameJsString: gameJsString,
+            userStyles: userStyles
         )
         
         self.webView.loadHTMLString(htmlString, baseURL: Bundle.main.bundleURL)
@@ -116,11 +126,20 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNa
     }
     
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        fatalError("Web view terminated. This may be caused by your game using up too much memory.")
+        print("Web view terminated, restarting. This may be caused by your game using up too much memory.")
+        
+        // Reload
+        loadGame()
     }
     
     func handleInternalMessage(message: String) {
         switch message {
+        case let x where x.starts(with: ReplayAlerter.messagePrefix):
+            alerter.handleInternalMessage(
+                message: message,
+                webView: webView,
+                internalMessageKey: internalMessageKey
+            )
         case let x where x.starts(with: ReplayStorageProvider.messagePrefix):
             ReplayStorageProvider.handleInternalMessage(
                 message: message,
