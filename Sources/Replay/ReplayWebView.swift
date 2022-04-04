@@ -1,4 +1,5 @@
 import WebKit
+import os.log
 
 let CONSOLE_LOG = "consoleLog"
 let ERROR = "error"
@@ -11,7 +12,7 @@ public class ReplayWebView: WKWebView {
     
     public func jsBridge(messageId: String, jsArg: String) {
         self.evaluateJavaScript(
-            "window.__replayGlobalCallbacks__[`\(messageId)`](\(jsArg));"
+            "window.__replayGlobalCallbacks__[`\(messageId)`] && window.__replayGlobalCallbacks__[`\(messageId)`](\(jsArg));"
         )
     }
 }
@@ -20,22 +21,31 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNa
     let webConfiguration = WKWebViewConfiguration()
     var webView: ReplayWebView!
     var userStyles: String
+    var jsRun: String
     var customGameJsString: String?
     let alerter = ReplayAlerter()
     let onJsCallback: (String) -> Void // userland
     let onLogCallback: (String) -> Void // for testing
+    let onJsCrash: (String) -> Void
+    let webWorkerFiles: [String]
     let internalMessageKey = "__internalReplay"
     
     init(
         customGameJsString: String? = nil,
         userStyles: String,
+        jsRun: String,
         onLogCallback: @escaping (String) -> Void = {_ in },
-        onJsCallback: @escaping (String) -> Void
+        onJsCallback: @escaping (String) -> Void,
+        onJsCrash: @escaping (String) -> Void,
+        webWorkerFiles: [String] = []
     ) {
         self.onLogCallback = onLogCallback
         self.onJsCallback = onJsCallback
         self.userStyles = userStyles
+        self.jsRun = jsRun
         self.customGameJsString = customGameJsString
+        self.onJsCrash = onJsCrash
+        self.webWorkerFiles = webWorkerFiles
         super.init()
         
         let contentController = WKUserContentController()
@@ -82,6 +92,25 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNa
             gameJsString = gameJsPathString
         }
         
+        var customJsScripts: [String] = []
+        
+        for file in webWorkerFiles {
+            guard let fileJsPath = Bundle.main.path(forResource: file, ofType: "js") else {
+                fatalError("Couldn't load \(file).js file in Bundle")
+            }
+            guard let fileJsPathString = try? String(
+                contentsOfFile: fileJsPath,
+                encoding: String.Encoding.utf8
+            ) else {
+                fatalError("Couldn't read JS file at path \(fileJsPath)")
+            }
+            customJsScripts.append("""
+    <script type="text/js-worker">
+    \(fileJsPathString)
+    </script>
+    """)
+        }
+        
         let renderCanvasJsPath = Bundle.module.path(forResource: "renderCanvas", ofType: ".js")!
         let renderCanvasJsString = try! String(
             contentsOfFile: renderCanvasJsPath,
@@ -91,21 +120,28 @@ class ReplayWebViewManager: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNa
         let htmlString = getReplayRenderCanvasHtmlString(
             renderCanvasJsString: renderCanvasJsString,
             gameJsString: gameJsString,
-            userStyles: userStyles
+            userStyles: userStyles,
+            jsRun: jsRun,
+            customJsScripts: customJsScripts
         )
         
         self.webView.loadHTMLString(htmlString, baseURL: Bundle.main.bundleURL)
     }
     
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        let messageBody = "\(message.body)"
         switch message.name {
         case ERROR:
-            fatalError("\(message.body)")
+            onJsCrash(messageBody)
         case CONSOLE_LOG:
-            onLogCallback("\(message.body)")
-            print(message.body)
+            onLogCallback(messageBody)
+            if #available(iOS 14.0, *) {
+                os_log("%@", messageBody)
+            } else {
+                print(messageBody)
+            }
         case JS_CALLBACK:
-            let value = "\(message.body)"
+            let value = messageBody
             if value.starts(with: internalMessageKey) {
                 let restOfMessage = String(value.dropFirst(internalMessageKey.count))
                 handleInternalMessage(message: restOfMessage)
